@@ -35,7 +35,17 @@ async function loadCell(){
 function prefetchNext(){const next=state.run?.components[state.componentIndex+1];if(!next)return;const run=encodeURIComponent(state.run.row.run_id);const img=new Image();img.src=`/api/fov?run_id=${run}&component_id=${next.component_id}&background=${$('backgroundSelect').value}`;fetch(`/api/component?run_id=${run}&component_id=${next.component_id}&chunk_start_s=0`).catch(()=>{})}
 function fovUrl(){return `/api/fov?run_id=${encodeURIComponent(state.run.row.run_id)}&component_id=${current().component_id}&background=${$('backgroundSelect').value}&v=${Date.now()}`}
 function setDecisionUI(decision){const panel=document.querySelector('.decision-panel');panel.classList.toggle('is-keep',decision==='keep');panel.classList.toggle('is-reject',decision==='reject');$('decisionHeading').textContent=decision==='keep'?'Manually accepted':decision==='reject'?'Manually rejected':'Pending review'}
-async function decide(decision){const c=current(),row=state.run.row;const out=await api('/api/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:row.run_id,component_id:c.component_id,decision,note:$('decisionNote').value})});c.decision=decision;setDecisionUI(decision);renderCellList();updateProgress();toast(`${decision==='keep'?'✓ kept':'× rejected'} · component ${c.component_id}`);if(state.catalog.auto_advance&&state.componentIndex<state.run.components.length-1){state.componentIndex++;state.chunkStart=0;state.chartViews={whole:null,chunk:null};await loadCell()}}
+async function decide(decision){const c=current(),row=state.run.row;const out=await api('/api/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run_id:row.run_id,component_id:c.component_id,decision,note:$('decisionNote').value})});c.decision=decision;setDecisionUI(decision);renderCellList();updateProgress();await refreshCatalogFromSql();toast(`${decision==='keep'?'✓ kept':'× rejected'} · component ${c.component_id}`);if(state.catalog.auto_advance&&state.componentIndex<state.run.components.length-1){state.componentIndex++;state.chunkStart=0;state.chartViews={whole:null,chunk:null};await loadCell()}}
+
+async function refreshCatalogFromSql(){
+  const group=$('groupSelect').value,mouse=$('mouseSelect').value,runId=$('sessionSelect').value;
+  state.catalog=await api('/api/catalog');
+  fill($('groupSelect'),Object.keys(state.catalog.groups),x=>x,x=>x);$('groupSelect').value=group;
+  fill($('mouseSelect'),Object.keys(state.catalog.groups[group]||{}),x=>x,x=>x);$('mouseSelect').value=mouse;
+  const sessions=state.catalog.groups[group]?.[mouse]||[];
+  fill($('sessionSelect'),sessions,x=>x.run_id,x=>`Session ${x.session} · ${x.reviewed}/${x.n_native}`);
+  $('sessionSelect').value=runId;
+}
 
 function bindActions(){
   $('prevCell').onclick=()=>moveCell(-1);$('nextCell').onclick=()=>moveCell(1);$('keepButton').onclick=()=>decide('keep');$('rejectButton').onclick=()=>decide('reject');
