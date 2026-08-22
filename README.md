@@ -12,6 +12,10 @@ layer keyed by:
 
 ## Launch
 
+Copy `config.example.json` to the ignored local file `config.json`, then set
+the paths to your `evil_caiman` catalog, mounted outputs, exclusion registry,
+decision database, and downstream export.
+
 Double-click `Evil Sorter.command`, or run:
 
 ```bash
@@ -42,7 +46,7 @@ Live database:
 
 Machine-readable downstream selection, rewritten atomically after each review:
 
-`/Users/deviandr/Documents/evil_caiman/configs/manual_cell_selections/evil_sorter_valence_native_v1.json`
+the path configured as `downstream_selection` in your local `config.json`.
 
 The JSON contains reviewed keep/reject component IDs, pending native accepted
 components, source paths, exclusion registry digest and a deterministic digest
@@ -61,3 +65,9 @@ or writes into successful `evil_caiman` analyses.
 
 Selector state is race-safe: stale requests are aborted and their responses are
 ignored, so rapid mouse changes cannot overwrite the most recent selection.
+
+## Privacy and provenance
+
+`config.json`, SQLite decisions, and exported selections are ignored by Git.
+The public repository contains no imaging data or manual decisions. Source
+CaImAn results are read-only; the manual layer is stored separately.

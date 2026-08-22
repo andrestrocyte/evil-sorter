@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "host": "127.0.0.1",
+  "port": 8765,
+  "evil_caiman_root": "/path/to/evil_caiman",
+  "tachyon_mount": "/path/to/evil_caiman_calcium",
+  "catalog": "/path/to/session_atlas_index.csv",
+  "reconciliation": "/path/to/session-reconciliation.csv",
+  "exclusion_registry": "/path/to/valence_analysis_exclusions.json",
+  "decision_database": "data/evil_sorter_decisions.sqlite",
+  "downstream_selection": "exports/evil_sorter_selection.json",
+  "reviewer": "your-name",
+  "component_gate": "native_accepted",
+  "chunk_minutes": 10,
+  "show_unavailable_sessions": [3, 4],
+  "auto_advance": true
+}

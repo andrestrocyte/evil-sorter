@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -8,18 +9,22 @@ from evil_sorter.selection import load_manual_keep
 from evil_sorter.store import DecisionStore
 
 
-CATALOG = Path("/Users/deviandr/Documents/evil_caiman/reports/valence-presentation-20260821-v2-atlas/sources/session_atlas/session_atlas_index.csv")
-MOUNT = Path("/Volumes/gluthi/deviandr/evil_caiman_calcium")
+EVIL_CAIMAN_ROOT = Path(os.environ.get("EVIL_CAIMAN_ROOT", "/nonexistent/evil_caiman"))
+CATALOG = Path(os.environ.get(
+    "EVIL_SORTER_REAL_CATALOG",
+    EVIL_CAIMAN_ROOT / "reports/valence-presentation-20260821-v2-atlas/sources/session_atlas/session_atlas_index.csv",
+))
+MOUNT = Path(os.environ.get("EVIL_SORTER_TACHYON_MOUNT", "/nonexistent/evil_caiman_calcium"))
 
 
 @pytest.mark.skipif(not CATALOG.exists() or not MOUNT.exists(), reason="valence catalog/Tachyon mount unavailable")
 def test_real_catalog_exclusion_and_atomic_downstream_export(tmp_path: Path):
     settings = Settings(
         host="127.0.0.1", port=0,
-        evil_caiman_root=Path("/Users/deviandr/Documents/evil_caiman"),
+        evil_caiman_root=EVIL_CAIMAN_ROOT,
         tachyon_mount=MOUNT, catalog=CATALOG,
-        reconciliation=Path("/Users/deviandr/Documents/evil_caiman/reports/valence-presentation-20260821-v2-atlas/sources/session_atlas/session-reconciliation.csv"),
-        exclusion_registry=Path("/Users/deviandr/Documents/evil_caiman/configs/valence_analysis_exclusions.json"),
+        reconciliation=EVIL_CAIMAN_ROOT / "reports/valence-presentation-20260821-v2-atlas/sources/session_atlas/session-reconciliation.csv",
+        exclusion_registry=EVIL_CAIMAN_ROOT / "configs/valence_analysis_exclusions.json",
         decision_database=tmp_path / "decisions.sqlite",
         downstream_selection=tmp_path / "selection.json", reviewer="test",
         component_gate="native_accepted", chunk_minutes=10,
