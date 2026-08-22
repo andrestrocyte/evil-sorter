@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Evil Sorter · manual cell curation</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="loading" class="loading"><div class="spinner"></div><span>Loading native components…</span></div>
+  <div class="shell">
+    <aside class="sidebar">
+      <header class="brand">
+        <img src="assets/evil_sorter_logo.png" alt="Evil Sorter mascot">
+        <div><h1>evil_sorter</h1><p>manual native-cell curation</p></div>
+      </header>
+
+      <section class="selector-card">
+        <label>Category<select id="groupSelect"></select></label>
+        <label>Mouse<select id="mouseSelect"></select></label>
+        <label>Session<select id="sessionSelect"></select></label>
+      </section>
+
+      <section class="progress-card">
+        <div class="progress-copy"><span id="progressText">0 / 0 reviewed</span><strong id="progressPercent">0%</strong></div>
+        <div class="progress-track"><i id="progressBar"></i></div>
+        <div class="counts"><span class="kept"><b id="keptCount">0</b> keep</span><span class="rejected"><b id="rejectCount">0</b> reject</span><span class="pending"><b id="pendingCount">0</b> pending</span></div>
+      </section>
+
+      <section class="cell-list-card">
+        <div class="section-label">Native accepted cells</div>
+        <div id="cellList" class="cell-list"></div>
+      </section>
+
+      <footer>
+        <div class="integrity"><span></span> evil_caiman read-only source</div>
+        <a href="/api/export.csv">Download decisions CSV</a>
+        <a href="/api/export.json">Download downstream JSON</a>
+        <p id="excludedNote"></p>
+      </footer>
+    </aside>
+
+    <main>
+      <nav class="topbar">
+        <div>
+          <span class="eyebrow" id="runEyebrow">SELECT A SESSION</span>
+          <h2 id="cellTitle">Native component</h2>
+          <p id="runSubtitle">Choose a category, mouse and session to begin.</p>
+        </div>
+        <div class="nav-actions">
+          <button id="prevCell" class="ghost" title="Previous cell (←)">← Previous</button>
+          <span id="cellPosition" class="position">— / —</span>
+          <button id="nextCell" class="ghost" title="Next cell (→)">Next →</button>
+        </div>
+      </nav>
+
+      <section class="workspace">
+        <article class="fov-panel panel">
+          <div class="panel-head">
+            <div><span class="eyebrow">SPATIAL FOOTPRINT</span><h3>Location in field of view</h3></div>
+            <div class="compact-controls">
+              <select id="backgroundSelect" title="FOV background"><option value="average">Mean image</option><option value="correlation">Correlation</option><option value="max">Maximum</option></select>
+              <button id="resetFov" class="icon-button" title="Reset FOV zoom">Reset</button>
+            </div>
+          </div>
+          <div id="fovViewport" class="fov-viewport">
+            <img id="fovImage" alt="Selected component overlay in FOV" draggable="false">
+            <div class="fov-legend"><i class="selected-line"></i> selected <i class="other-line"></i> other native cells</div>
+          </div>
+          <div class="metric-grid">
+            <div><span>CaImAn ID</span><strong id="metricId">—</strong></div>
+            <div><span>SNR</span><strong id="metricSnr">—</strong></div>
+            <div><span>r value</span><strong id="metricR">—</strong></div>
+            <div><span>CNN</span><strong id="metricCnn">—</strong></div>
+            <div><span>Soma valid</span><strong id="metricSoma">—</strong></div>
+          </div>
+        </article>
+
+        <article class="traces-panel panel">
+          <div class="panel-head">
+            <div><span class="eyebrow">TEMPORAL QC</span><h3>Whole-session signals</h3></div>
+            <div class="signal-key"><span class="dff">F_dff</span><span class="calcium">C</span><span class="spikes">S deconvolved</span></div>
+          </div>
+          <div class="canvas-wrap"><canvas id="wholeCanvas"></canvas><div class="chart-help">wheel: zoom · drag: pan · double-click: reset</div></div>
+
+          <div class="chunk-head">
+            <div><span class="eyebrow">10-MINUTE INSPECTION WINDOW</span><h3 id="chunkTitle">0:00–10:00</h3></div>
+            <div class="chunk-controls"><button id="prevChunk" class="icon-button">−10 min</button><input id="chunkSlider" type="range" min="0" max="0" step="600" value="0"><button id="nextChunk" class="icon-button">+10 min</button></div>
+          </div>
+          <div class="canvas-wrap chunk"><canvas id="chunkCanvas"></canvas><div class="chart-help">same raw signal units · independently scaled rows</div></div>
+        </article>
+
+        <article class="decision-panel panel">
+          <div class="decision-copy">
+            <span class="eyebrow">MANUAL DECISION</span>
+            <h3 id="decisionHeading">Pending review</h3>
+            <p>Judge morphology, localization, signal continuity and calcium-like dynamics. Your decision is saved immediately as a separate audit layer.</p>
+            <input id="decisionNote" type="text" placeholder="Optional note: neuropil, edge, motion, good transient…">
+          </div>
+          <div class="decision-actions">
+            <button id="rejectButton" class="decision reject"><span>×</span><div><strong>Reject</strong><small>keyboard X</small></div></button>
+            <button id="keepButton" class="decision keep"><span>✓</span><div><strong>Keep</strong><small>keyboard A</small></div></button>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
+
