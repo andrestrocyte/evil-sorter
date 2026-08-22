@@ -23,6 +23,10 @@ The app opens at `http://127.0.0.1:8765`.
 ## Review controls
 
 - Choose group, mouse and session in the left sidebar.
+- Changing group or mouse immediately loads the corresponding run while preserving
+  the current session number when that session exists for the new mouse.
+- Requested sessions that exist in the inventory but have no closed CaImAn run
+  remain visible as disabled `unavailable` entries with the audited reason.
 - Use Previous/Next or the arrow keys to move between native accepted cells.
 - Press **A** or click the green tick to keep a cell.
 - Press **X** or click the red cross to reject a cell.
@@ -54,3 +58,6 @@ rejects incomplete reviews by default.
 The app reads compact catalog rows from the valence session atlas and loads one
 cell at a time from the mounted Tachyon outputs. It never copies HDF5 recordings
 or writes into successful `evil_caiman` analyses.
+
+Selector state is race-safe: stale requests are aborted and their responses are
+ignored, so rapid mouse changes cannot overwrite the most recent selection.

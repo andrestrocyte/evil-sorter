@@ -47,6 +47,7 @@ class EvilData:
         self.excluded = self._load_exclusions()
         self.rows = self._load_catalog()
         self.by_run = {row["run_id"]: row for row in self.rows}
+        self.unavailable_rows = self._load_unavailable_sessions()
 
     def _load_exclusions(self) -> set[str]:
         raw = json.loads(self.settings.exclusion_registry.read_text())
@@ -67,21 +68,62 @@ class EvilData:
         rows.sort(key=lambda x: ({"AM": 0, "AL": 1, "PM": 2}.get(x["group"], 9), x["mouse_id"], x["session_id"]))
         return rows
 
+    def _load_unavailable_sessions(self) -> list[dict[str, Any]]:
+        """Expose requested missing sessions without pretending they contain data."""
+        if not self.settings.reconciliation.exists():
+            return []
+        available = {(r["group"], r["mouse_id"], r["session_id"], r["variant"]) for r in self.rows}
+        known_mice = {(r["group"], r["mouse_id"]) for r in self.rows}
+        unavailable: list[dict[str, Any]] = []
+        with self.settings.reconciliation.open(newline="") as handle:
+            for raw in csv.DictReader(handle):
+                group = str(raw.get("condition", "")).upper()
+                mouse = str(raw.get("mouse_id", ""))
+                try:
+                    session = int(raw.get("session_id", ""))
+                except ValueError:
+                    continue
+                variant = str(raw.get("variant", "standard"))
+                key = (group, mouse, session, variant)
+                if (group, mouse) not in known_mice or mouse in self.excluded:
+                    continue
+                if session not in self.settings.show_unavailable_sessions or variant != "standard":
+                    continue
+                if key in available or raw.get("status") == "completed":
+                    continue
+                reason = str(raw.get("exclusion_reason") or raw.get("inventory_reasons") or raw.get("status") or "unavailable")
+                unavailable.append({
+                    "group": group, "mouse_id": mouse, "session": session, "variant": variant,
+                    "available": False, "status": str(raw.get("status") or "unavailable"),
+                    "reason": reason, "inventory_frame_count": int(raw.get("inventory_frame_count") or 0),
+                })
+        unavailable.sort(key=lambda x: (x["group"], x["mouse_id"], x["session"]))
+        return unavailable
+
     def catalog(self) -> dict[str, Any]:
         groups: dict[str, dict[str, list[dict[str, Any]]]] = {}
-        all_decisions = {r["run_id"]: self.store.get_run(r["run_id"]) for r in self.rows}
+        decisions_by_run: dict[str, list[dict[str, Any]]] = {}
+        for decision in self.store.all():
+            decisions_by_run.setdefault(decision["run_id"], []).append(decision)
         for row in self.rows:
-            decisions = all_decisions[row["run_id"]]
+            decisions = decisions_by_run.get(row["run_id"], [])
             groups.setdefault(row["group"], {}).setdefault(row["mouse_id"], []).append({
                 "session": row["session_id"], "run_id": row["run_id"],
+                "variant": row["variant"], "available": True,
                 "n_native": row["n_native_accepted"], "reviewed": len(decisions),
-                "kept": sum(d["decision"] == "keep" for d in decisions.values()),
-                "rejected": sum(d["decision"] == "reject" for d in decisions.values()),
-                "duration_s": row["duration_s"],
+                "kept": sum(d["decision"] == "keep" for d in decisions),
+                "rejected": sum(d["decision"] == "reject" for d in decisions),
+                "duration_s": row["duration_s"], "status": "completed", "reason": "",
             })
+        for row in self.unavailable_rows:
+            groups.setdefault(row["group"], {}).setdefault(row["mouse_id"], []).append(dict(row))
+        for mice in groups.values():
+            for sessions in mice.values():
+                sessions.sort(key=lambda x: (int(x["session"]), 0 if x.get("available") else 1, str(x.get("variant", ""))))
         return {"groups": groups, "excluded_mice": sorted(self.excluded),
                 "component_gate": "native_accepted", "chunk_minutes": self.settings.chunk_minutes,
-                "auto_advance": self.settings.auto_advance}
+                "auto_advance": self.settings.auto_advance,
+                "unavailable_session_count": len(self.unavailable_rows)}
 
     def run_dir(self, run_id: str) -> Path:
         row = self.by_run.get(run_id)

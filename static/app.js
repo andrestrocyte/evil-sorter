@@ -1,5 +1,5 @@
 const $=id=>document.getElementById(id);
-const state={catalog:null,run:null,componentIndex:0,trace:null,chunkStart:0,chartViews:{whole:null,chunk:null},fov:{scale:1,x:0,y:0,drag:false},busy:0};
+const state={catalog:null,run:null,componentIndex:0,trace:null,chunkStart:0,chartViews:{whole:null,chunk:null},fov:{scale:1,x:0,y:0,drag:false},busy:0,loadToken:0,cellToken:0,chunkToken:0,runAbort:null,cellAbort:null,chunkAbort:null};
 const colors={F_dff:'#8129df',C:'#2c9eb4',S:'#df6a43'};
 
 async function api(url,options={}){busy(1);try{const r=await fetch(url,options);const data=await r.json();if(!r.ok)throw new Error(data.error||r.statusText);return data}finally{busy(-1)}}
@@ -11,25 +11,39 @@ function metric(v,d=2){return v==null?'—':Number(v).toFixed(d)}
 async function init(){
   state.catalog=await api('/api/catalog');
   const groups=Object.keys(state.catalog.groups);fill($('groupSelect'),groups,g=>g,g=>g);$('excludedNote').textContent=`Excluded by registry: ${state.catalog.excluded_mice.join(', ')||'none'}`;
-  $('groupSelect').onchange=populateMice;$('mouseSelect').onchange=populateSessions;$('sessionSelect').onchange=loadRun;
+  $('groupSelect').onchange=handleGroupChange;$('mouseSelect').onchange=handleMouseChange;$('sessionSelect').onchange=loadRun;
   populateMice();bindActions();setupFov();setupCanvas($('wholeCanvas'),'whole');setupCanvas($('chunkCanvas'),'chunk');
   await loadRun();
 }
 function fill(select,items,value,label){select.innerHTML='';for(const x of items){const o=document.createElement('option');o.value=value(x);o.textContent=label(x);select.append(o)}}
-function populateMice(){const g=$('groupSelect').value;const mice=Object.keys(state.catalog.groups[g]||{});fill($('mouseSelect'),mice,x=>x,x=>x);populateSessions()}
-function populateSessions(){const g=$('groupSelect').value,m=$('mouseSelect').value,sessions=state.catalog.groups[g]?.[m]||[];fill($('sessionSelect'),sessions,x=>x.run_id,x=>`Session ${x.session} · ${x.reviewed}/${x.n_native}`)}
-async function loadRun(){const runId=$('sessionSelect').value;if(!runId)return;state.run=await api(`/api/run?run_id=${encodeURIComponent(runId)}`);let pending=state.run.components.findIndex(x=>x.decision==='pending');state.componentIndex=pending>=0?pending:0;state.chunkStart=0;state.chartViews={whole:null,chunk:null};renderCellList();updateProgress();await loadCell()}
+function populateMice(preferredSession=null){const g=$('groupSelect').value;const mice=Object.keys(state.catalog.groups[g]||{});fill($('mouseSelect'),mice,x=>x,x=>x);populateSessions(null,preferredSession)}
+function sessionLabel(x){return x.available?`Session ${x.session} · ${x.reviewed}/${x.n_native}`:`Session ${x.session} · unavailable`}
+function conciseUnavailable(x){const raw=(x.reason||'').toLowerCase();if(raw.includes('unsupported_prairie_raw_chunks')||raw.includes('missing_tiffs'))return `S${x.session}: PrairieView chunks require TIFF conversion`;return `S${x.session}: ${String(x.status||'unavailable').replaceAll('_',' ')}`}
+function populateSessions(preferredRunId=null,preferredSession=null){
+  const g=$('groupSelect').value,m=$('mouseSelect').value,sessions=state.catalog.groups[g]?.[m]||[],select=$('sessionSelect');select.innerHTML='';
+  for(const x of sessions){const o=document.createElement('option');o.value=x.available?x.run_id:`unavailable:${x.session}`;o.textContent=sessionLabel(x);o.disabled=!x.available;o.title=x.reason||'';select.append(o)}
+  const available=sessions.filter(x=>x.available),sameSession=available.find(x=>Number(x.session)===Number(preferredSession));if(preferredRunId&&available.some(x=>x.run_id===preferredRunId))select.value=preferredRunId;else if(sameSession)select.value=sameSession.run_id;else if(available.length)select.value=available[0].run_id;
+  const missing=sessions.filter(x=>!x.available),note=$('sessionStatus');note.classList.toggle('visible',missing.length>0);note.innerHTML=missing.length?`<strong>Unavailable imaging</strong><br>${missing.map(conciseUnavailable).join('<br>')}`:'';
+}
+function invalidateSelectionLoads(){state.loadToken++;state.cellToken++;state.chunkToken++;state.runAbort?.abort();state.cellAbort?.abort();state.chunkAbort?.abort()}
+async function handleGroupChange(){const preferredSession=state.run?.row.session_id;invalidateSelectionLoads();populateMice(preferredSession);await loadRun()}
+async function handleMouseChange(){const preferredSession=state.run?.row.session_id;invalidateSelectionLoads();populateSessions(null,preferredSession);await loadRun()}
+async function loadRun(){
+  const runId=$('sessionSelect').value;if(!runId||runId.startsWith('unavailable:'))return;
+  state.runAbort?.abort();const controller=new AbortController();state.runAbort=controller;const token=++state.loadToken;
+  try{const loaded=await api(`/api/run?run_id=${encodeURIComponent(runId)}`,{signal:controller.signal});if(token!==state.loadToken||$('sessionSelect').value!==runId)return;state.run=loaded;let pending=state.run.components.findIndex(x=>x.decision==='pending');state.componentIndex=pending>=0?pending:0;state.chunkStart=0;state.chartViews={whole:null,chunk:null};renderCellList();updateProgress();await loadCell()}catch(e){if(e.name!=='AbortError')throw e}
+}
 function current(){return state.run?.components[state.componentIndex]}
 function renderCellList(){const box=$('cellList');box.innerHTML='';state.run.components.forEach((c,i)=>{const b=document.createElement('button');b.className=`cell-chip ${c.decision} ${i===state.componentIndex?'active':''}`;b.textContent=c.component_id;b.title=`Component ${c.component_id}: ${c.decision}`;b.onclick=()=>{state.componentIndex=i;state.chunkStart=0;state.chartViews={whole:null,chunk:null};loadCell()};box.append(b)})}
 function updateProgress(){const cs=state.run.components,k=cs.filter(x=>x.decision==='keep').length,r=cs.filter(x=>x.decision==='reject').length,p=cs.length-k-r,reviewed=k+r,pc=Math.round(reviewed/cs.length*100);$('progressText').textContent=`${reviewed} / ${cs.length} reviewed`;$('progressPercent').textContent=`${pc}%`;$('progressBar').style.width=`${pc}%`;$('keptCount').textContent=k;$('rejectCount').textContent=r;$('pendingCount').textContent=p}
 async function loadCell(){
-  const c=current(),row=state.run.row;if(!c)return;
+  const c=current(),row=state.run.row;if(!c)return;state.cellAbort?.abort();const controller=new AbortController();state.cellAbort=controller;const token=++state.cellToken,runId=row.run_id,componentId=c.component_id;
   renderCellList();$('runEyebrow').textContent=`${row.group} · ${row.mouse_id} · SESSION ${row.session_id}`;$('cellTitle').textContent=`Native component ${c.component_id}`;$('runSubtitle').textContent=`${row.variant} · ${state.run.components.length} native accepted · ${fmtTime(state.run.duration_s)} total`;$('cellPosition').textContent=`${state.componentIndex+1} / ${state.run.components.length}`;
   $('metricId').textContent=c.component_id;$('metricSnr').textContent=metric(c.snr);$('metricR').textContent=metric(c.r_value);$('metricCnn').textContent=metric(c.cnn);$('metricSoma').textContent=c.soma_valid?'yes':'no';$('decisionNote').value='';
   setDecisionUI(c.decision);resetFov();$('fovImage').src=fovUrl();
   const max=Math.max(0,state.run.duration_s-state.catalog.chunk_minutes*60);$('chunkSlider').max=max;$('chunkSlider').value=state.chunkStart;
-  state.trace=await api(`/api/component?run_id=${encodeURIComponent(row.run_id)}&component_id=${c.component_id}&chunk_start_s=${state.chunkStart}`);
-  state.chunkStart=state.trace.chunk_start_s;state.chartViews.whole=[0,state.trace.duration_s];state.chartViews.chunk=[state.trace.chunk_start_s,state.trace.chunk_stop_s];updateChunkTitle();drawAll();
+  let trace;try{trace=await api(`/api/component?run_id=${encodeURIComponent(runId)}&component_id=${componentId}&chunk_start_s=${state.chunkStart}`,{signal:controller.signal})}catch(e){if(e.name==='AbortError')return;throw e}if(token!==state.cellToken||state.run?.row.run_id!==runId||current()?.component_id!==componentId)return;
+  state.trace=trace;state.chunkStart=state.trace.chunk_start_s;state.chartViews.whole=[0,state.trace.duration_s];state.chartViews.chunk=[state.trace.chunk_start_s,state.trace.chunk_stop_s];updateChunkTitle();drawAll();
   setTimeout(prefetchNext,120);
 }
 function prefetchNext(){const next=state.run?.components[state.componentIndex+1];if(!next)return;const run=encodeURIComponent(state.run.row.run_id);const img=new Image();img.src=`/api/fov?run_id=${run}&component_id=${next.component_id}&background=${$('backgroundSelect').value}`;fetch(`/api/component?run_id=${run}&component_id=${next.component_id}&chunk_start_s=0`).catch(()=>{})}
@@ -42,9 +56,7 @@ async function refreshCatalogFromSql(){
   state.catalog=await api('/api/catalog');
   fill($('groupSelect'),Object.keys(state.catalog.groups),x=>x,x=>x);$('groupSelect').value=group;
   fill($('mouseSelect'),Object.keys(state.catalog.groups[group]||{}),x=>x,x=>x);$('mouseSelect').value=mouse;
-  const sessions=state.catalog.groups[group]?.[mouse]||[];
-  fill($('sessionSelect'),sessions,x=>x.run_id,x=>`Session ${x.session} · ${x.reviewed}/${x.n_native}`);
-  $('sessionSelect').value=runId;
+  populateSessions(runId);
 }
 
 function bindActions(){
@@ -55,7 +67,7 @@ function bindActions(){
   addEventListener('resize',drawAll);
 }
 function moveCell(delta){const next=Math.max(0,Math.min(state.run.components.length-1,state.componentIndex+delta));if(next===state.componentIndex)return;state.componentIndex=next;state.chunkStart=0;state.chartViews={whole:null,chunk:null};loadCell()}
-async function setChunk(start){const max=Math.max(0,state.run.duration_s-600);state.chunkStart=Math.max(0,Math.min(max,Math.round(start/600)*600));$('chunkSlider').value=state.chunkStart;const c=current(),row=state.run.row;state.trace=await api(`/api/component?run_id=${encodeURIComponent(row.run_id)}&component_id=${c.component_id}&chunk_start_s=${state.chunkStart}`);state.chartViews.chunk=[state.trace.chunk_start_s,state.trace.chunk_stop_s];updateChunkTitle();drawAll()}
+async function setChunk(start){const max=Math.max(0,state.run.duration_s-600);state.chunkStart=Math.max(0,Math.min(max,Math.round(start/600)*600));$('chunkSlider').value=state.chunkStart;const c=current(),row=state.run.row,runId=row.run_id,componentId=c.component_id;state.chunkAbort?.abort();const controller=new AbortController();state.chunkAbort=controller;const token=++state.chunkToken;let trace;try{trace=await api(`/api/component?run_id=${encodeURIComponent(runId)}&component_id=${componentId}&chunk_start_s=${state.chunkStart}`,{signal:controller.signal})}catch(e){if(e.name==='AbortError')return;throw e}if(token!==state.chunkToken||state.run?.row.run_id!==runId||current()?.component_id!==componentId)return;state.trace=trace;state.chartViews.chunk=[state.trace.chunk_start_s,state.trace.chunk_stop_s];updateChunkTitle();drawAll()}
 function updateChunkTitle(){$('chunkTitle').textContent=`${fmtTime(state.trace?.chunk_start_s||0)}–${fmtTime(state.trace?.chunk_stop_s||600)}`}
 
 function setupFov(){const v=$('fovViewport'),img=$('fovImage');v.addEventListener('wheel',e=>{e.preventDefault();state.fov.scale=Math.max(1,Math.min(8,state.fov.scale*(e.deltaY<0?1.18:.85)));applyFov()},{passive:false});v.onpointerdown=e=>{state.fov.drag=true;state.fov.px=e.clientX;state.fov.py=e.clientY;v.setPointerCapture(e.pointerId)};v.onpointermove=e=>{if(!state.fov.drag)return;state.fov.x+=e.clientX-state.fov.px;state.fov.y+=e.clientY-state.fov.py;state.fov.px=e.clientX;state.fov.py=e.clientY;applyFov()};v.onpointerup=()=>state.fov.drag=false;v.ondblclick=resetFov}
