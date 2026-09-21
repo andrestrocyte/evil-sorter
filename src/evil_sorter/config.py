@@ -24,6 +24,8 @@ class Settings:
     chunk_minutes: int
     show_unavailable_sessions: tuple[int, ...]
     auto_advance: bool
+    review_sessions: tuple[int, ...] | None = None
+    modalities: tuple[dict, ...] = ()
 
 
 def load_settings(path: Path | None = None) -> Settings:
@@ -50,6 +52,8 @@ def load_settings(path: Path | None = None) -> Settings:
         reviewer=str(raw.get("reviewer", "unknown")),
         component_gate=str(raw["component_gate"]),
         chunk_minutes=int(raw.get("chunk_minutes", 10)),
-        show_unavailable_sessions=tuple(int(x) for x in raw.get("show_unavailable_sessions", [3, 4])),
+        show_unavailable_sessions=tuple(int(x) for x in raw.get("show_unavailable_sessions", [])),
         auto_advance=bool(raw.get("auto_advance", True)),
+        review_sessions=None if raw.get("review_sessions") is None else tuple(int(x) for x in raw["review_sessions"]),
+        modalities=tuple(raw.get("modalities", [])),
     )

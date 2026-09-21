@@ -5,6 +5,7 @@ import json
 import mimetypes
 import traceback
 import webbrowser
+from threading import RLock
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,7 @@ class App:
         self.store = DecisionStore(self.settings.decision_database)
         self.data = EvilData(self.settings, self.store)
         self.static = ROOT / "static"
+        self.save_lock = RLock()
 
 
 APP: App
@@ -50,12 +52,13 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/fov":
                 png = APP.data.fov_png(required(q, "run_id"), int(required(q, "component_id")),
                                        q.get("background", ["average"])[0])
-                return self.bytes(png, "image/png")
+                return self.bytes(png, "image/png", {"Cache-Control": "private, max-age=86400"})
             if parsed.path == "/api/export.csv":
                 return self.bytes(APP.store.csv_bytes(), "text/csv; charset=utf-8",
                                   {"Content-Disposition": "attachment; filename=evil_sorter_decisions.csv"})
             if parsed.path == "/api/export.json":
-                payload = APP.data.export_selection()
+                with APP.save_lock:
+                    payload = APP.data.export_selection()
                 return self.bytes((json.dumps(payload, indent=2) + "\n").encode(), "application/json",
                                   {"Content-Disposition": "attachment; filename=evil_sorter_selection.json"})
             return self.static_file(parsed.path)
@@ -75,9 +78,11 @@ class Handler(BaseHTTPRequestHandler):
             valid = {x["component_id"] for x in info["components"]}
             if component_id not in valid:
                 raise ValueError("decision target is not native accepted")
-            row = APP.store.put(info["row"]["analysis_id"], run_id, component_id,
-                                str(body["decision"]), APP.settings.reviewer, str(body.get("note", "")))
-            exported = APP.data.export_selection()
+            # Serialize the database/export pair, including concurrent browser tabs.
+            with APP.save_lock:
+                row = APP.store.put(info["row"]["analysis_id"], run_id, component_id,
+                                    str(body["decision"]), APP.settings.reviewer, str(body.get("note", "")))
+                exported = APP.data.export_selection()
             return self.json({"saved": row, "selection_sha256": exported["selection_sha256"]})
         except Exception as exc:
             traceback.print_exc()
@@ -99,9 +104,15 @@ class Handler(BaseHTTPRequestHandler):
     def bytes(self, payload: bytes, content_type: str, headers: dict[str, str] | None = None,
               status: int = 200) -> None:
         self.send_response(status); self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(payload))); self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(payload)))
+        if "Cache-Control" not in (headers or {}):
+            self.send_header("Cache-Control", "no-store")
         for key, value in (headers or {}).items(): self.send_header(key, value)
-        self.end_headers(); self.wfile.write(payload)
+        self.end_headers()
+        try:
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # Navigation may cancel an obsolete read.
 
 
 def required(query: dict[str, list[str]], key: str) -> str:
@@ -125,4 +136,3 @@ def main() -> None:
 
 
 if __name__ == "__main__": main()
-

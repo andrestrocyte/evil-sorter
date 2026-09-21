@@ -43,21 +43,50 @@ Double-click `Evil Sorter.command`, or run:
 ./Evil\ Sorter.command
 ```
 
-The app opens at `http://127.0.0.1:8765`.
+The app opens at the host and port in `config.json` (example default: 8765).
+The launcher uses the sibling evil_caiman
+Python environment when available; `EVIL_SORTER_PYTHON` overrides it.
 
 ## Reviewing cells
 
-- Choose group, mouse and session in the left sidebar.
+- Click a group, mouse button and session tile in the left sidebar. Search by
+  mouse ID, or use **Next unfinished** to jump to the next incomplete session
+  across the cohort. Completed sessions are green; unavailable sessions are dimmed.
 - Changing group or mouse immediately loads the corresponding run while preserving
   the current session number when that session exists for the new mouse.
 - Requested sessions that exist in the inventory but have no closed CaImAn run
   remain visible as disabled `unavailable` entries with the audited reason.
+- Optional `review_sessions` in the local config limits the required sessions;
+  omitted or `null` includes every catalog session. Historical decisions remain
+  in SQLite when sessions are removed from the active scope.
+- Optional `modalities` groups session tiles into expandable sections. Each entry
+  has an `id`, a display `label`, and a list of integer `sessions`. Unassigned
+  sessions remain visible under **Other sessions**. With no groups configured,
+  all sessions appear together.
+- `show_unavailable_sessions` lists session numbers to display even when missing.
+  Missing catalog/inventory entries and processed runs with zero native-accepted
+  cells are labeled separately and disabled. Zero accepted cells does not mean
+  the raw recording is empty.
+- Named variants are discovered from the catalog and appear as distinct tiles
+  inside their session group only for animals that have them.
 - Use Previous/Next or the arrow keys to move between native accepted cells.
 - Press **A** or click the green tick to keep a cell.
 - Press **X** or click the red cross to reject a cell.
 - Mouse-wheel over the FOV or traces to zoom; drag to pan; double-click to reset.
 - Move the chunk slider to inspect consecutive 10-minute windows.
-- Decisions save immediately and review resumes where it stopped.
+- Decisions save automatically and review resumes where it stopped.
+
+Navigation stays responsive while images and traces load. Nearby cells are
+prefetched and retained in a bounded browser cache; immutable FOV images use
+browser caching. First-time reads still depend on the Tachyon mount. The viewer
+clears obsolete imagery and only enables curation when the selected cell's
+image and traces have loaded.
+
+Keep/reject advances immediately while a serialized save queue writes the
+decision database and downstream selection. Watch **Saving… / All decisions
+saved** in the sidebar before closing. A failed save remains pending, shows a
+retry button, and pauses further decisions. Leaving with pending saves triggers
+the browser's warning.
 
 ## From visual judgment to analysis
 

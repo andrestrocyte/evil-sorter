@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="app.css">
 </head>
 <body>
-  <div id="loading" class="loading"><div class="spinner"></div><span>Loading native components…</span></div>
+  <div id="loading" class="loading hidden" role="status"><div class="spinner"></div><span>Loading…</span></div>
   <div class="shell">
     <aside class="sidebar">
       <header class="brand">
@@ -16,10 +16,16 @@
       </header>
 
       <section class="selector-card">
-        <label>Category<select id="groupSelect"></select></label>
-        <label>Mouse<select id="mouseSelect"></select></label>
-        <label>Session<select id="sessionSelect"></select></label>
-        <div id="sessionStatus" class="session-status" aria-live="polite"></div>
+        <div id="groupButtons" class="group-buttons" aria-label="Anatomy group"></div>
+        <select id="groupSelect" hidden aria-label="Group"></select>
+        <label for="mouseSearch">Mouse</label>
+        <input id="mouseSearch" type="search" placeholder="Find mouse…" autocomplete="off">
+        <div id="mouseButtons" class="mouse-buttons" aria-label="Mice"></div>
+        <select id="mouseSelect" hidden aria-label="Mouse"></select>
+        <div class="session-heading"><span>Session</span><button id="nextPendingSession" class="text-button">Next unfinished →</button></div>
+        <div id="sessionButtons" class="session-groups" aria-label="Sessions"></div>
+        <select id="sessionSelect" hidden aria-label="Session"></select>
+        <details id="skipDetails"><summary>Sessions to skip</summary><div id="sessionStatus" class="session-status"></div></details>
       </section>
 
       <section class="progress-card">
@@ -34,6 +40,8 @@
       </section>
 
       <footer>
+        <div id="saveStatus" role="status">All decisions saved</div>
+        <button id="retrySave" class="text-button" hidden>Retry saving</button>
         <div class="integrity"><span></span> evil_caiman read-only source</div>
         <a href="/api/export.csv">Download decisions CSV</a>
         <a href="/api/export.json">Download downstream JSON</a>
@@ -95,7 +103,7 @@
           <div class="decision-copy">
             <span class="eyebrow">MANUAL DECISION</span>
             <h3 id="decisionHeading">Pending review</h3>
-            <p>Judge morphology, localization, signal continuity and calcium-like dynamics. Your decision is saved immediately as a separate audit layer.</p>
+            <p>Judge morphology, localization, signal continuity and calcium-like dynamics. Check “All decisions saved” before closing.</p>
             <input id="decisionNote" type="text" placeholder="Optional note: neuropil, edge, motion, good transient…">
           </div>
           <div class="decision-actions">

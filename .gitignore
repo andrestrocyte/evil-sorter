@@ -8,3 +8,6 @@ exports/*.csv
 exports/*.json
 !data/.gitkeep
 !exports/.gitkeep
+
+# Local screenshots, browser QA, and generated outputs
+output/

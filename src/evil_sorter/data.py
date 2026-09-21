@@ -63,6 +63,8 @@ class EvilData:
                 row = dict(raw)
                 for key in ("session_id", "frame_count", "n_native_accepted", "n_soma_valid"):
                     row[key] = int(row[key])
+                if self.settings.review_sessions is not None and row["session_id"] not in self.settings.review_sessions:
+                    continue
                 row["duration_s"] = float(row["duration_s"])
                 rows.append(row)
         rows.sort(key=lambda x: ({"AM": 0, "AL": 1, "PM": 2}.get(x["group"], 9), x["mouse_id"], x["session_id"]))
@@ -87,7 +89,7 @@ class EvilData:
                 key = (group, mouse, session, variant)
                 if (group, mouse) not in known_mice or mouse in self.excluded:
                     continue
-                if session not in self.settings.show_unavailable_sessions or variant != "standard":
+                if session not in self.settings.show_unavailable_sessions or (self.settings.review_sessions is not None and session not in self.settings.review_sessions):
                     continue
                 if key in available or raw.get("status") == "completed":
                     continue
@@ -97,6 +99,20 @@ class EvilData:
                     "available": False, "status": str(raw.get("status") or "unavailable"),
                     "reason": reason, "inventory_frame_count": int(raw.get("inventory_frame_count") or 0),
                 })
+        represented = {(r["group"], r["mouse_id"], r["session_id"]) for r in self.rows}
+        represented.update((r["group"], r["mouse_id"], r["session"]) for r in unavailable)
+        for group, mouse in sorted(known_mice):
+            for session in self.settings.show_unavailable_sessions:
+                if self.settings.review_sessions is not None and session not in self.settings.review_sessions:
+                    continue
+                if (group, mouse, session) not in represented:
+                    unavailable.append({
+                        "group": group, "mouse_id": mouse, "session": session,
+                        "variant": "standard", "available": False,
+                        "status": "not_in_catalog",
+                        "reason": "No processed run or acquisition entry in the loaded inventory.",
+                        "inventory_frame_count": 0,
+                    })
         unavailable.sort(key=lambda x: (x["group"], x["mouse_id"], x["session"]))
         return unavailable
 
@@ -109,11 +125,13 @@ class EvilData:
             decisions = decisions_by_run.get(row["run_id"], [])
             groups.setdefault(row["group"], {}).setdefault(row["mouse_id"], []).append({
                 "session": row["session_id"], "run_id": row["run_id"],
-                "variant": row["variant"], "available": True,
+                "variant": row["variant"], "available": row["n_native_accepted"] > 0,
                 "n_native": row["n_native_accepted"], "reviewed": len(decisions),
                 "kept": sum(d["decision"] == "keep" for d in decisions),
                 "rejected": sum(d["decision"] == "reject" for d in decisions),
-                "duration_s": row["duration_s"], "status": "completed", "reason": "",
+                "duration_s": row["duration_s"],
+                "status": "completed" if row["n_native_accepted"] else "no_reviewable_cells",
+                "reason": "" if row["n_native_accepted"] else "Processed imaging contains zero native-accepted components; nothing to curate.",
             })
         for row in self.unavailable_rows:
             groups.setdefault(row["group"], {}).setdefault(row["mouse_id"], []).append(dict(row))
@@ -121,9 +139,21 @@ class EvilData:
             for sessions in mice.values():
                 sessions.sort(key=lambda x: (int(x["session"]), 0 if x.get("available") else 1, str(x.get("variant", ""))))
         return {"groups": groups, "excluded_mice": sorted(self.excluded),
+                "review_sessions": None if self.settings.review_sessions is None else list(self.settings.review_sessions),
+                "modalities": self.session_modalities(),
                 "component_gate": "native_accepted", "chunk_minutes": self.settings.chunk_minutes,
                 "auto_advance": self.settings.auto_advance,
                 "unavailable_session_count": len(self.unavailable_rows)}
+
+    def session_modalities(self) -> list[dict[str, Any]]:
+        """Keep all catalog sessions visible, including ungrouped additions."""
+        groups = [dict(group) for group in self.settings.modalities]
+        grouped = {int(s) for group in groups for s in group["sessions"]}
+        present = {r["session_id"] for r in self.rows} | {r["session"] for r in self.unavailable_rows}
+        remaining = sorted(present - grouped)
+        if remaining:
+            groups.append({"id": "ungrouped", "label": "Other sessions" if groups else "Sessions", "sessions": remaining})
+        return groups
 
     def run_dir(self, run_id: str) -> Path:
         row = self.by_run.get(run_id)
@@ -134,7 +164,7 @@ class EvilData:
             raise RuntimeError(f"run is not closed: {path}")
         return path
 
-    @lru_cache(maxsize=16)
+    @lru_cache(maxsize=256)
     def run_info(self, run_id: str) -> dict[str, Any]:
         row = self.by_run[run_id]
         path = self.run_dir(run_id)
@@ -166,6 +196,7 @@ class EvilData:
             x["decision"] = decisions.get(x["component_id"], {}).get("decision", "pending")
         return clone
 
+    @lru_cache(maxsize=64)
     def component(self, run_id: str, component_id: int, chunk_start_s: float) -> dict[str, Any]:
         info = self.run_info(run_id)
         valid = {x["component_id"] for x in info["components"]}
@@ -204,12 +235,9 @@ class EvilData:
         if component_id not in native:
             raise KeyError(f"component {component_id} is not native accepted")
         run = self.run_dir(run_id)
-        summaries = np.load(run / "motion_correction/summary_images.npz")
-        key = {"average": "average_image", "correlation": "correlation_image", "max": "max_image"}.get(background, "average_image")
-        image = np.asarray(summaries[key], dtype=float)
         matrix, dims, union = self.spatial_data(run_id)
         selected = np.asarray(matrix[:, component_id].toarray()).ravel().reshape(dims, order="F")
-        rgb = normalize_gray(image)
+        rgb = self.background_rgb(run_id, background).copy()
         all_edge = union ^ ndimage.binary_erosion(union)
         selected_mask = selected >= np.nanmax(selected) * 0.22
         selected_edge = ndimage.binary_dilation(selected_mask, iterations=2) ^ ndimage.binary_erosion(selected_mask, iterations=1)
@@ -220,6 +248,12 @@ class EvilData:
         rgb[selected_edge] = np.array([185, 255, 72], dtype=np.uint8)
         out = io.BytesIO(); Image.fromarray(rgb).save(out, format="PNG", optimize=False)
         return out.getvalue()
+
+    @lru_cache(maxsize=24)
+    def background_rgb(self, run_id: str, background: str) -> np.ndarray:
+        key = {"average": "average_image", "correlation": "correlation_image", "max": "max_image"}.get(background, "average_image")
+        with np.load(self.run_dir(run_id) / "motion_correction/summary_images.npz") as summaries:
+            return normalize_gray(np.asarray(summaries[key], dtype=float))
 
     @lru_cache(maxsize=8)
     def spatial_data(self, run_id: str) -> tuple[sparse.csc_matrix, tuple[int, int], np.ndarray]:
@@ -266,6 +300,7 @@ class EvilData:
         payload: dict[str, Any] = {
             "schema_version": 1, "selection_name": "evil_sorter_valence_native_v1",
             "selection_gate": "evil_sorter_manual_keep", "review_universe": "native_accepted",
+            "review_sessions": None if self.settings.review_sessions is None else list(self.settings.review_sessions),
             "generated_at": utc_now(), "reviewer": self.settings.reviewer,
             "source_catalog": str(self.settings.catalog),
             "source_catalog_sha256": sha256_file(self.settings.catalog),
